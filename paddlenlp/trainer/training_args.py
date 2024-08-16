@@ -837,6 +837,10 @@ class TrainingArguments:
     release_grads: Optional[bool] = field(
         default=False, metadata={"help": "Whether to release gradients during training. Default is `False`."}
     )
+    tp_comm_overlap:  Optional[bool] = field(
+        default=False,
+        metadata={"help": "Initialize ub for tp-comm-overlap"},
+    )
 
     def __post_init__(self):
         env_local_rank = int(os.environ.get("PADDLE_RANK_IN_NODE", -1))

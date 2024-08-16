@@ -267,6 +267,7 @@ class GPTConfig(PretrainedConfig):
         fuse_attention_qkv: bool = False,
         fuse_attention_ffn: bool = False,
         fused_softmax_with_triangular: bool = False,
+        tp_comm_overlap: bool = False,
         **kwargs
     ):
         super().__init__(pad_token_id=pad_token_id, **kwargs)
@@ -301,3 +302,5 @@ class GPTConfig(PretrainedConfig):
 
         self.use_fast_layer_norm = use_fast_layer_norm
         self.fused_softmax_with_triangular = fused_softmax_with_triangular
+
+        self.tp_comm_overlap = tp_comm_overlap #"tp_comm_overlap" implys sequence_parallel must be enabled

@@ -47,6 +47,8 @@ from paddlenlp.transformers.configuration_utils import LlmMetaConfig, llmmetacla
 from paddlenlp.utils.batch_sampler import DistributedBatchSampler
 from paddlenlp.utils.log import logger
 from paddlenlp.utils.tools import get_env_device
+from paddle.distributed import fleet
+import transformer_engine.paddle as te
 
 # Pretaining Environment Variables to support sharding stage1 overlap optimization.
 os.environ["USE_CASUAL_MASK"] = "True"
@@ -427,6 +429,14 @@ def main():
     config.num_hidden_layers = (
         model_args.num_hidden_layers if model_args.num_hidden_layers is not None else config.num_hidden_layers
     )
+    config.tp_comm_overlap = training_args.tp_comm_overlap
+    if training_args.tp_comm_overlap:
+        assert config.sequence_parallel, '"tp_comm_overlap" implys sequence_parallel must be enabled'
+        assert training_args.bf16, 'tp-comm-overlap can only support bf16'
+        hcg = fleet.get_hybrid_communicate_group()
+        tp_size = hcg.get_model_parallel_world_size()
+        te.initialize_ub([training_args.per_device_train_batch_size * config.seq_length, config.hidden_size], paddle.bfloat16, tp_size)
+
     # Config for model using dropout, such as GPT.
     if hasattr(config, "hidden_dropout_prob"):
         config.hidden_dropout_prob = model_args.hidden_dropout_prob
