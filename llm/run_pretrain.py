@@ -47,6 +47,8 @@ from paddlenlp.transformers import (
 from paddlenlp.utils.batch_sampler import DistributedBatchSampler
 from paddlenlp.utils.log import logger
 from paddlenlp.utils.tools import get_env_device
+from paddle.distributed import fleet
+import transformer_engine.paddle as te
 
 
 def add_start_docstrings(*docstr):
@@ -472,6 +474,14 @@ def main():
 
     config.tensor_parallel_degree = training_args.tensor_parallel_degree
     config.tensor_parallel_rank = training_args.tensor_parallel_rank
+
+    config.tp_comm_overlap = training_args.tp_comm_overlap
+    if training_args.tp_comm_overlap:
+        assert config.sequence_parallel, '"tp_comm_overlap" implys sequence_parallel must be enabled'
+        assert training_args.bf16, 'tp-comm-overlap can only support bf16'
+        hcg = fleet.get_hybrid_communicate_group()
+        tp_size = hcg.get_model_parallel_world_size()
+        te.initialize_ub([training_args.per_device_train_batch_size * config.seq_length, config.hidden_size], paddle.bfloat16, tp_size)
 
     # Config for model using dropout, such as GPT.
     config.hidden_dropout_prob = model_args.hidden_dropout_prob

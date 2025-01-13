@@ -68,6 +68,8 @@ try:
 except:
     FusedDropoutAdd = None
 
+import transformer_engine.paddle as te
+
 OriginLayerNorm = paddle.nn.LayerNorm
 
 
@@ -246,13 +248,27 @@ class MultiHeadAttention(nn.Layer):
                     fuse_matmul_bias=config.use_fused_linear,
                 )
 
-            self.out_proj = RowParallelLinear(
-                config.hidden_size,
-                config.hidden_size,
-                has_bias=True,
-                input_is_parallel=True,
-                fuse_matmul_bias=config.use_fused_linear,
-            )
+            if config.tp_comm_overlap:
+                assert config.sequence_parallel, '"tp_comm_overlap" implys sequence_parallel must be enabled'
+                self.out_proj = te.Linear(
+                    config.hidden_size,
+                    config.hidden_size,
+                    bias_attr=True, #has_bias=True,
+                    parallel_mode='row', #input_is_parallel=True,
+                    sequence_parallel=config.sequence_parallel,
+                    #fuse_matmul_bias=self.config.use_fused_linear,
+                    ub_overlap_rs=True,
+                    ub_overlap_ag=True,
+                    ub_name='proj',
+                )
+            else:
+                self.out_proj = RowParallelLinear(
+                    config.hidden_size,
+                    config.hidden_size,
+                    input_is_parallel=True,
+                    has_bias=True,
+                    fuse_matmul_bias=config.use_fused_linear,
+                )
         else:
             if self.config.fuse_attention_qkv:
                 self.qkv_proj = nn.Linear(config.hidden_size, 3 * config.hidden_size, bias_attr=True)
@@ -591,14 +607,27 @@ class GPTDecoderLayer(nn.Layer):
                 has_bias=True,
                 fuse_matmul_bias=self.config.use_fused_linear,
             )
-
-            self.linear2 = RowParallelLinear(
-                config.intermediate_size,
-                config.hidden_size,
-                input_is_parallel=True,
-                has_bias=True,
-                fuse_matmul_bias=self.config.use_fused_linear,
-            )
+            if config.tp_comm_overlap:
+                assert config.sequence_parallel, '"tp_comm_overlap" implys sequence_parallel must be enabled'
+                self.linear2 = te.Linear(
+                    config.intermediate_size,
+                    config.hidden_size,
+                    bias_attr=True, #has_bias=True,
+                    parallel_mode='row', #input_is_parallel=True,
+                    sequence_parallel=config.sequence_parallel,
+                    #fuse_matmul_bias=self.config.use_fused_linear,
+                    ub_overlap_rs=True,
+                    ub_overlap_ag=True,
+                    ub_name='fc2',
+                )
+            else:
+                self.linear2 = RowParallelLinear(
+                    config.intermediate_size,
+                    config.hidden_size,
+                    input_is_parallel=True,
+                    has_bias=True,
+                    fuse_matmul_bias=self.config.use_fused_linear,
+                )
         else:
             self.linear1 = nn.Linear(config.hidden_size, config.intermediate_size, bias_attr=True)
             self.linear2 = nn.Linear(config.intermediate_size, config.hidden_size, bias_attr=True)

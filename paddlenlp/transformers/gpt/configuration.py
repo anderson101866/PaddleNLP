@@ -276,6 +276,7 @@ class GPTConfig(PretrainedConfig):
         virtual_pp_degree: int = 1,
         sequence_parallel=False,
         fuse_sequence_parallel_allreduce=False,
+        tp_comm_overlap: bool = False,
         **kwargs
     ):
         super().__init__(pad_token_id=pad_token_id, **kwargs)
@@ -322,3 +323,5 @@ class GPTConfig(PretrainedConfig):
             assert (
                 self.tensor_parallel_degree > 1
             ), f"senquence-parallel only works in mp, got mp={self.tensor_parallel_degree}"
+
+        self.tp_comm_overlap = tp_comm_overlap #"tp_comm_overlap" implys sequence_parallel must be enabled

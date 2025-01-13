@@ -791,6 +791,10 @@ class TrainingArguments:
         default=False,
         metadata={"help": "Enable MoE (Mixture of Experts) expert parallel training"},
     )
+    tp_comm_overlap:  Optional[bool] = field(
+        default=False,
+        metadata={"help": "Initialize ub for tp-comm-overlap"},
+    )
 
     def __post_init__(self):
         env_local_rank = int(os.environ.get("PADDLE_RANK_IN_NODE", -1))
