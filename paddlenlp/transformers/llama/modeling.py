@@ -24,6 +24,7 @@ from typing import Optional, Tuple
 import paddle
 import paddle.distributed.fleet.meta_parallel as mpu
 import paddle.nn.functional as F
+import transformer_engine.paddle as te
 from paddle import Tensor, nn
 from paddle.autograd import PyLayer
 from paddle.distributed import fleet
@@ -585,15 +586,31 @@ class LlamaMLP(nn.Layer):
             ColumnParallelLinear = linear_utils.ColumnParallelLinear
             RowParallelLinear = linear_utils.RowParallelLinear
 
+        if config.tp_comm_overlap:
+            assert config.sequence_parallel, '"tp_comm_overlap" implys sequence_parallel must be enabled'
         if config.tensor_parallel_degree > 1:
             if config.fuse_attention_ffn:
-                self.gate_up_fused_proj = ColumnParallelLinear(
-                    self.hidden_size,
-                    self.intermediate_size * 2,
-                    gather_output=False,
-                    has_bias=False,
-                )
+                if config.tp_comm_overlap:
+                    self.gate_up_fused_proj = te.Linear(
+                        self.hidden_size,
+                        self.intermediate_size * 2,
+                        #gather_output=False,
+                        bias_attr=False, #has_bias=False,
+                        parallel_mode='column',
+                        sequence_parallel=config.sequence_parallel,
+                        ub_overlap_rs=True,
+                        ub_overlap_ag=True,
+                        ub_name='fc1',
+                    )
+                else:
+                    self.gate_up_fused_proj = ColumnParallelLinear(
+                        self.hidden_size,
+                        self.intermediate_size * 2,
+                        gather_output=False,
+                        has_bias=False,
+                    )
             else:
+                assert not config.tp_comm_overlap, "Not implemented"
                 self.gate_proj = ColumnParallelLinear(
                     self.hidden_size,
                     self.intermediate_size,
@@ -607,12 +624,24 @@ class LlamaMLP(nn.Layer):
                     has_bias=False,
                 )
 
-            self.down_proj = RowParallelLinear(
-                self.intermediate_size,
-                self.hidden_size,
-                input_is_parallel=True,
-                has_bias=False,
-            )
+            if config.tp_comm_overlap:
+                self.down_proj = te.Linear(
+                    self.intermediate_size,
+                    self.hidden_size,
+                    bias_attr=False, #has_bias=False,
+                    parallel_mode='row', #input_is_parallel=True,
+                    sequence_parallel=config.sequence_parallel,
+                    ub_overlap_rs=True,
+                    ub_overlap_ag=True,
+                    ub_name='fc2',
+                )
+            else:
+                self.down_proj = RowParallelLinear(
+                    self.intermediate_size,
+                    self.hidden_size,
+                    input_is_parallel=True,
+                    has_bias=False,
+                )
         else:
             if config.fuse_attention_ffn:
                 self.gate_up_fused_proj = Linear(self.hidden_size, self.intermediate_size * 2, bias_attr=False)
@@ -713,15 +742,31 @@ class LlamaAttention(nn.Layer):
             ColumnParallelLinear = linear_utils.ColumnParallelLinear
             RowParallelLinear = linear_utils.RowParallelLinear
 
+        if config.tp_comm_overlap:
+            assert config.sequence_parallel, '"tp_comm_overlap" implys sequence_parallel must be enabled'
         if config.tensor_parallel_degree > 1:
             if self.fuse_attention_qkv:
-                self.qkv_proj = ColumnParallelLinear(
-                    self.hidden_size,
-                    self.hidden_size + 2 * self.config.num_key_value_heads * self.head_dim,
-                    has_bias=False,
-                    gather_output=False,
-                )
+                if config.tp_comm_overlap:
+                    self.qkv_proj = te.Linear(
+                        self.hidden_size,
+                        self.hidden_size + 2 * self.config.num_key_value_heads * self.head_dim,
+                        #gather_output=False,
+                        bias_attr=False, #has_bias=False,
+                        parallel_mode='column',
+                        sequence_parallel=config.sequence_parallel,
+                        ub_overlap_rs=True,
+                        ub_overlap_ag=True,
+                        ub_name='qkv',
+                    )
+                else:
+                    self.qkv_proj = ColumnParallelLinear(
+                        self.hidden_size,
+                        self.hidden_size + 2 * self.config.num_key_value_heads * self.head_dim,
+                        gather_output=False,
+                        has_bias=False,
+                    )
             else:
+                assert not config.tp_comm_overlap, "Not implemented"
                 self.q_proj = ColumnParallelLinear(
                     self.hidden_size,
                     self.hidden_size,
@@ -778,12 +823,24 @@ class LlamaAttention(nn.Layer):
                 )
 
         if config.tensor_parallel_degree > 1:
-            self.o_proj = RowParallelLinear(
-                self.hidden_size,
-                self.hidden_size,
-                has_bias=False,
-                input_is_parallel=True,
-            )
+            if config.tp_comm_overlap:
+                self.o_proj = te.Linear(
+                    self.hidden_size,
+                    self.hidden_size,
+                    bias_attr=False, #has_bias=False,
+                    parallel_mode='row', #input_is_parallel=True,
+                    sequence_parallel=config.sequence_parallel,
+                    ub_overlap_rs=True,
+                    ub_overlap_ag=True,
+                    ub_name='proj',
+                )
+            else:
+                self.o_proj = RowParallelLinear(
+                    self.hidden_size,
+                    self.hidden_size,
+                    has_bias=False,
+                    input_is_parallel=True,
+                )
         else:
             self.o_proj = Linear(
                 self.hidden_size,
