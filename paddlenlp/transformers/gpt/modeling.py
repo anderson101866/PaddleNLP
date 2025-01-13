@@ -215,15 +215,33 @@ class MultiHeadAttention(nn.Layer):
             assert config.num_attention_heads % config.tensor_parallel_degree == 0
             self.num_attention_heads = config.num_attention_heads // config.tensor_parallel_degree
 
+            if config.tp_comm_overlap:
+                assert config.sequence_parallel, '"tp_comm_overlap" implys sequence_parallel must be enabled'
+
             if config.fuse_attention_qkv:
-                self.qkv_proj = ColumnParallelLinear(
-                    config.hidden_size,
-                    3 * config.hidden_size,
-                    has_bias=True,
-                    gather_output=False,
-                    fuse_matmul_bias=config.use_fused_linear,
-                )
+                if config.tp_comm_overlap:
+                    self.qkv_proj = te.Linear(
+                        config.hidden_size,
+                        3 * config.hidden_size,
+                        #gather_output=False,
+                        bias_attr=True, #has_bias=True,
+                        parallel_mode='column',
+                        sequence_parallel=config.sequence_parallel,
+                        #fuse_matmul_bias=self.config.use_fused_linear,
+                        ub_overlap_rs=True,
+                        ub_overlap_ag=True,
+                        ub_name='qkv',
+                    )
+                else:
+                    self.qkv_proj = ColumnParallelLinear(
+                        config.hidden_size,
+                        3 * config.hidden_size,
+                        has_bias=True,
+                        gather_output=False,
+                        fuse_matmul_bias=config.use_fused_linear,
+                    )
             else:
+                assert not config.tp_comm_overlap, "Not implemented"
                 self.q_proj = ColumnParallelLinear(
                     config.hidden_size,
                     config.hidden_size,
@@ -249,7 +267,6 @@ class MultiHeadAttention(nn.Layer):
                 )
 
             if config.tp_comm_overlap:
-                assert config.sequence_parallel, '"tp_comm_overlap" implys sequence_parallel must be enabled'
                 self.out_proj = te.Linear(
                     config.hidden_size,
                     config.hidden_size,
@@ -600,15 +617,20 @@ class GPTDecoderLayer(nn.Layer):
 
         # TODO:config.fuse_attention_ffn @DrownFish19
         if config.tensor_parallel_degree > 1:
-            self.linear1 = ColumnParallelLinear(
-                config.hidden_size,
-                config.intermediate_size,
-                gather_output=False,
-                has_bias=True,
-                fuse_matmul_bias=self.config.use_fused_linear,
-            )
             if config.tp_comm_overlap:
                 assert config.sequence_parallel, '"tp_comm_overlap" implys sequence_parallel must be enabled'
+                self.linear1 = te.Linear(
+                    config.hidden_size,
+                    config.intermediate_size,
+                    #gather_output=False,
+                    bias_attr=True, #has_bias=True,
+                    parallel_mode='column',
+                    sequence_parallel=config.sequence_parallel,
+                    #fuse_matmul_bias=self.config.use_fused_linear,
+                    ub_overlap_rs=True,
+                    ub_overlap_ag=True,
+                    ub_name='fc1',
+                )
                 self.linear2 = te.Linear(
                     config.intermediate_size,
                     config.hidden_size,
@@ -621,6 +643,13 @@ class GPTDecoderLayer(nn.Layer):
                     ub_name='fc2',
                 )
             else:
+                self.linear1 = ColumnParallelLinear(
+                    config.hidden_size,
+                    config.intermediate_size,
+                    gather_output=False,
+                    has_bias=True,
+                    fuse_matmul_bias=self.config.use_fused_linear,
+                )
                 self.linear2 = RowParallelLinear(
                     config.intermediate_size,
                     config.hidden_size,
